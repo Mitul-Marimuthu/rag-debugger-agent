@@ -7,7 +7,7 @@ from rag.chunker import chunk_file
 from rag.store import add_chunks, delete_file_chunks, get_or_create_collection
 from config import settings
 
-SUPPORTED_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb"}
+SUPPORTED_EXTENSIONS = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb", ".html"}
 HASH_CACHE_FILE = ".index_hashes.json"
 IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "dist", "build", ".next"}
 

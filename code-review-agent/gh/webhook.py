@@ -93,7 +93,7 @@ async def _handle_pr_review(repo_name: str, pr_number: int, head_sha: str) -> No
 
 
 def _is_reviewable(filename: str) -> bool:
-    reviewable_exts = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb"}
+    reviewable_exts = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb", ".html"}
     from pathlib import Path
     return Path(filename).suffix.lower() in reviewable_exts
 

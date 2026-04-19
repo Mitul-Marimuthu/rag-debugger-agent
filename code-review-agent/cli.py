@@ -16,20 +16,49 @@ console = Console()
 
 @app.command()
 def index(
-    repo_path: str = typer.Argument(".", help="Path to the repository to index"),
+    repo_path: str = typer.Argument(".", help="Local path or 'owner/repo' GitHub identifier"),
     force: bool = typer.Option(False, "--force", "-f", help="Re-index all files, ignoring cache"),
     verbose: bool = typer.Option(True, "--verbose/--quiet", "-v/-q"),
 ):
-    """Index a codebase into the vector store for RAG retrieval."""
+    """Index a codebase into the vector store for RAG retrieval.
+
+    Pass a local path or a GitHub repo identifier (e.g. 'owner/repo').
+    """
+    import tempfile
+    import shutil
     from agents.indexer import index_repo
 
-    path = Path(repo_path).resolve()
-    if not path.exists():
-        typer.echo(f"Error: path '{repo_path}' does not exist.", err=True)
-        raise typer.Exit(1)
+    github_repo = None
+    tmp_dir = None
 
-    console.print(f"[bold blue]Indexing repository:[/bold blue] {path}")
-    stats = index_repo(str(path), force=force, verbose=verbose)
+    if "/" in repo_path and not Path(repo_path).exists():
+        # Looks like owner/repo — clone it
+        from config import settings
+        import git as gitpython
+
+        github_repo = repo_path
+        clone_url = f"https://{settings.github_token}@github.com/{github_repo}.git"
+        tmp_dir = tempfile.mkdtemp(prefix="cra_index_")
+        console.print(f"[bold blue]Cloning[/bold blue] {github_repo} ...")
+        try:
+            gitpython.Repo.clone_from(clone_url, tmp_dir)
+        except Exception as e:
+            typer.echo(f"Error cloning repo: {e}", err=True)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise typer.Exit(1)
+        path = Path(tmp_dir)
+    else:
+        path = Path(repo_path).resolve()
+        if not path.exists():
+            typer.echo(f"Error: path '{repo_path}' does not exist.", err=True)
+            raise typer.Exit(1)
+
+    try:
+        console.print(f"[bold blue]Indexing repository:[/bold blue] {github_repo or path}")
+        stats = index_repo(str(path), force=force, verbose=verbose)
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     table = Table(title="Indexing Complete")
     table.add_column("Metric", style="cyan")
@@ -220,7 +249,7 @@ def _index_rules() -> None:
 
 
 def _is_reviewable(filename: str) -> bool:
-    reviewable_exts = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb"}
+    reviewable_exts = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb", ".html"}
     return Path(filename).suffix.lower() in reviewable_exts
 
 

@@ -6,8 +6,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     anthropic_api_key: str = Field(..., description="Anthropic API key")
-    openai_api_key: str = Field(default="", description="OpenAI API key (unused if using Gemini embeddings)")
-    gemini_api_key: str = Field(..., description="Gemini API key for embeddings")
+    openai_api_key: str = Field(default="", description="Unused")
+    gemini_api_key: str = Field(default="", description="Unused")
     github_token: str = Field(..., description="GitHub personal access token")
     github_webhook_secret: str = Field(default="", description="GitHub webhook HMAC secret")
 

@@ -79,6 +79,33 @@ def chunk_javascript_file(source_code: str, file_path: str) -> list[dict]:
     return _fallback_chunk(source_code, file_path)
 
 
+def chunk_html_file(source_code: str, file_path: str) -> list[dict]:
+    import re
+
+    chunks = []
+    # Extract <script>, <style>, and <template> blocks as distinct chunks
+    for tag in ("script", "style", "template"):
+        for m in re.finditer(
+            rf"(<{tag}[\s>].*?</{tag}>)", source_code, re.DOTALL | re.IGNORECASE
+        ):
+            lines_before = source_code[: m.start()].count("\n") + 1
+            content = m.group(1)
+            end_line = lines_before + content.count("\n")
+            chunks.append({
+                "content": content,
+                "type": tag,
+                "name": tag,
+                "lineno": lines_before,
+                "end_lineno": end_line,
+                "file": file_path,
+                "language": "html",
+            })
+
+    if not chunks:
+        return _fallback_chunk(source_code, file_path)
+    return chunks
+
+
 def _fallback_chunk(source_code: str, file_path: str, chunk_size: int = 50) -> list[dict]:
     lines = source_code.splitlines()
     chunks = []
@@ -109,5 +136,7 @@ def chunk_file(file_path: str, source_code: Optional[str] = None) -> list[dict]:
         return chunk_python_file(source_code, file_path)
     elif ext in (".js", ".jsx", ".ts", ".tsx"):
         return chunk_javascript_file(source_code, file_path)
+    elif ext == ".html":
+        return chunk_html_file(source_code, file_path)
     else:
         return _fallback_chunk(source_code, file_path)

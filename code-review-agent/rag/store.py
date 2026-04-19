@@ -1,12 +1,10 @@
 from typing import Optional, List
 
-from google import genai as google_genai
 import chromadb
 from config import settings
 
 
 _chroma_client: Optional[chromadb.PersistentClient] = None
-_gemini_client: Optional[google_genai.Client] = None
 
 
 def _get_client() -> chromadb.PersistentClient:
@@ -16,28 +14,11 @@ def _get_client() -> chromadb.PersistentClient:
     return _chroma_client
 
 
-def _get_gemini() -> google_genai.Client:
-    global _gemini_client
-    if _gemini_client is None:
-        _gemini_client = google_genai.Client(api_key=settings.gemini_api_key)
-    return _gemini_client
-
-
-def _embed(texts: List[str], task_type: str = "retrieval_document") -> List[List[float]]:
-    client = _get_gemini()
-    embeddings = []
-    for text in texts:
-        response = client.models.embed_content(
-            model=settings.embedding_model,
-            contents=text,
-            config={"task_type": task_type},
-        )
-        embeddings.append(response.embeddings[0].values)
-    return embeddings
-
-
 def get_or_create_collection(collection_name: str) -> chromadb.Collection:
-    return _get_client().get_or_create_collection(collection_name)
+    return _get_client().get_or_create_collection(
+        collection_name,
+        metadata={"hnsw:space": "cosine"},
+    )
 
 
 def add_chunks(chunks: List[dict], collection_name: str = None) -> None:
@@ -67,19 +48,15 @@ def add_chunks(chunks: List[dict], collection_name: str = None) -> None:
     update_indices = [i for i, id_ in enumerate(ids) if id_ in existing_ids]
 
     if new_indices:
-        new_docs = [documents[i] for i in new_indices]
         collection.add(
-            documents=new_docs,
-            embeddings=_embed(new_docs, "retrieval_document"),
+            documents=[documents[i] for i in new_indices],
             metadatas=[metadatas[i] for i in new_indices],
             ids=[ids[i] for i in new_indices],
         )
 
     if update_indices:
-        upd_docs = [documents[i] for i in update_indices]
         collection.update(
-            documents=upd_docs,
-            embeddings=_embed(upd_docs, "retrieval_document"),
+            documents=[documents[i] for i in update_indices],
             metadatas=[metadatas[i] for i in update_indices],
             ids=[ids[i] for i in update_indices],
         )
@@ -102,9 +79,8 @@ def query_collection(
         where = {"file": {"$ne": exclude_file}}
 
     try:
-        query_embedding = _embed([query_text], "retrieval_query")[0]
         results = collection.query(
-            query_embeddings=[query_embedding],
+            query_texts=[query_text],
             n_results=k,
             where=where,
         )
