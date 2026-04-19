@@ -1,32 +1,46 @@
+from typing import Optional, List
+
+from google import genai as google_genai
 import chromadb
-from chromadb.utils import embedding_functions
 from config import settings
 
 
-_client: chromadb.PersistentClient | None = None
+_chroma_client: Optional[chromadb.PersistentClient] = None
+_gemini_client: Optional[google_genai.Client] = None
 
 
 def _get_client() -> chromadb.PersistentClient:
-    global _client
-    if _client is None:
-        _client = chromadb.PersistentClient(path=settings.chroma_path)
-    return _client
+    global _chroma_client
+    if _chroma_client is None:
+        _chroma_client = chromadb.PersistentClient(path=settings.chroma_path)
+    return _chroma_client
 
 
-def _get_embedding_function():
-    return embedding_functions.OpenAIEmbeddingFunction(
-        api_key=settings.openai_api_key,
-        model_name=settings.embedding_model,
-    )
+def _get_gemini() -> google_genai.Client:
+    global _gemini_client
+    if _gemini_client is None:
+        _gemini_client = google_genai.Client(api_key=settings.gemini_api_key)
+    return _gemini_client
+
+
+def _embed(texts: List[str], task_type: str = "retrieval_document") -> List[List[float]]:
+    client = _get_gemini()
+    embeddings = []
+    for text in texts:
+        response = client.models.embed_content(
+            model=settings.embedding_model,
+            contents=text,
+            config={"task_type": task_type},
+        )
+        embeddings.append(response.embeddings[0].values)
+    return embeddings
 
 
 def get_or_create_collection(collection_name: str) -> chromadb.Collection:
-    client = _get_client()
-    ef = _get_embedding_function()
-    return client.get_or_create_collection(collection_name, embedding_function=ef)
+    return _get_client().get_or_create_collection(collection_name)
 
 
-def add_chunks(chunks: list[dict], collection_name: str = None) -> None:
+def add_chunks(chunks: List[dict], collection_name: str = None) -> None:
     if not chunks:
         return
 
@@ -53,15 +67,19 @@ def add_chunks(chunks: list[dict], collection_name: str = None) -> None:
     update_indices = [i for i, id_ in enumerate(ids) if id_ in existing_ids]
 
     if new_indices:
+        new_docs = [documents[i] for i in new_indices]
         collection.add(
-            documents=[documents[i] for i in new_indices],
+            documents=new_docs,
+            embeddings=_embed(new_docs, "retrieval_document"),
             metadatas=[metadatas[i] for i in new_indices],
             ids=[ids[i] for i in new_indices],
         )
 
     if update_indices:
+        upd_docs = [documents[i] for i in update_indices]
         collection.update(
-            documents=[documents[i] for i in update_indices],
+            documents=upd_docs,
+            embeddings=_embed(upd_docs, "retrieval_document"),
             metadatas=[metadatas[i] for i in update_indices],
             ids=[ids[i] for i in update_indices],
         )
@@ -73,7 +91,7 @@ def query_collection(
     exclude_file: str = None,
     collection_name: str = None,
     min_score: float = None,
-) -> list[dict]:
+) -> List[dict]:
     col_name = collection_name or settings.chroma_collection_name
     collection = get_or_create_collection(col_name)
     k = n_results or settings.top_k_results
@@ -84,8 +102,9 @@ def query_collection(
         where = {"file": {"$ne": exclude_file}}
 
     try:
+        query_embedding = _embed([query_text], "retrieval_query")[0]
         results = collection.query(
-            query_texts=[query_text],
+            query_embeddings=[query_embedding],
             n_results=k,
             where=where,
         )

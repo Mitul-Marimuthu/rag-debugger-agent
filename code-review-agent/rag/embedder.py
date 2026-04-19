@@ -1,8 +1,10 @@
+from typing import Optional
+
 from openai import OpenAI
 from config import settings
 
 
-_client: OpenAI | None = None
+_client: Optional[OpenAI] = None
 
 
 def _get_client() -> OpenAI:

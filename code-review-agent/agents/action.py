@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from typing import Optional
 
 from agents.reviewer import ReviewResult, ReviewIssue
 from gh.client import (
@@ -160,8 +161,8 @@ def create_fix_pr(
     repo_name: str,
     base_pr_number: int,
     results: list[ReviewResult],
-    base_branch: str | None = None,
-) -> dict | None:
+    base_branch: Optional[str] = None,
+) -> Optional[dict]:
     fixable = [r for r in results if any(i.fix for i in r.issues)]
     if not fixable:
         return None
