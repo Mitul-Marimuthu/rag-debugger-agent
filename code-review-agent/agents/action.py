@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 
 from agents.reviewer import ReviewResult, ReviewIssue
-from github.client import (
+from gh.client import (
     create_branch,
     update_file_on_branch,
     create_pull_request,

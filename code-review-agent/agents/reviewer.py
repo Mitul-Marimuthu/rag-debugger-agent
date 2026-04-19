@@ -1,9 +1,8 @@
 import json
-from dataclasses import dataclass, field
 from typing import Optional
 
 import anthropic
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from config import settings
 from prompts.review_prompt import SYSTEM_PROMPT, REVIEW_SCHEMA, build_review_prompt
@@ -18,7 +17,7 @@ class ReviewIssue(BaseModel):
     description: str
     explanation: str
     fix: str
-    references: list[str] = field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
 
 
 class ReviewResult(BaseModel):

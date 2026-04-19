@@ -11,7 +11,7 @@ from agents.indexer import delta_index
 from agents.retriever import retrieve_context, retrieve_rules
 from agents.reviewer import review_file
 from agents.action import post_review_to_pr, create_fix_pr
-from github.client import get_pr_changed_files, get_file_content, get_pr
+from gh.client import get_pr_changed_files, get_file_content, get_pr
 
 app = FastAPI(title="Code Review Agent Webhook")
 

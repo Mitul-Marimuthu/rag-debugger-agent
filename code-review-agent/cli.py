@@ -96,7 +96,7 @@ def review_pr(
     fix_pr: bool = typer.Option(False, "--fix-pr", help="Create a fix PR with automated patches"),
 ):
     """Review a GitHub pull request."""
-    from github.client import get_pr_changed_files, get_file_content, get_pr
+    from gh.client import get_pr_changed_files, get_file_content, get_pr
     from agents.retriever import retrieve_context, retrieve_rules
     from agents.reviewer import review_file
     from agents.action import post_review_to_pr, create_fix_pr
@@ -147,7 +147,7 @@ def serve(
     port: Optional[int] = typer.Option(None, help="Override webhook port"),
 ):
     """Start the webhook server to listen for GitHub PR events."""
-    from github.webhook import run_webhook
+    from gh.webhook import run_webhook
     from config import settings
 
     if host:
