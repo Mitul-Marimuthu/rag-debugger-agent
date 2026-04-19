@@ -6,6 +6,8 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import print as rprint
 
+#testing
+
 app = typer.Typer(
     name="code-review-agent",
     help="Autonomous code review agent with RAG-powered codebase intelligence.",
