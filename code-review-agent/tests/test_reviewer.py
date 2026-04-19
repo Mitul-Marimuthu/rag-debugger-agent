@@ -38,16 +38,9 @@ def test_review_file_returns_result(mock_get_client):
     mock_client = MagicMock()
     mock_get_client.return_value = mock_client
 
-    mock_final = MagicMock()
-    mock_final.content = [
-        MagicMock(type="text", text=json.dumps(MOCK_REVIEW_RESPONSE))
-    ]
-
-    mock_stream = MagicMock()
-    mock_stream.__enter__ = MagicMock(return_value=mock_stream)
-    mock_stream.__exit__ = MagicMock(return_value=False)
-    mock_stream.get_final_message = MagicMock(return_value=mock_final)
-    mock_client.messages.stream.return_value = mock_stream
+    mock_response = MagicMock()
+    mock_response.text = json.dumps(MOCK_REVIEW_RESPONSE)
+    mock_client.models.generate_content.return_value = mock_response
 
     result = review_file(SAMPLE_CODE, "app.py", [], [])
 
@@ -62,14 +55,9 @@ def test_review_file_malformed_json(mock_get_client):
     mock_client = MagicMock()
     mock_get_client.return_value = mock_client
 
-    mock_final = MagicMock()
-    mock_final.content = [MagicMock(type="text", text="not json")]
-
-    mock_stream = MagicMock()
-    mock_stream.__enter__ = MagicMock(return_value=mock_stream)
-    mock_stream.__exit__ = MagicMock(return_value=False)
-    mock_stream.get_final_message = MagicMock(return_value=mock_final)
-    mock_client.messages.stream.return_value = mock_stream
+    mock_response = MagicMock()
+    mock_response.text = "not json"
+    mock_client.models.generate_content.return_value = mock_response
 
     result = review_file(SAMPLE_CODE, "app.py", [], [])
     assert isinstance(result, ReviewResult)

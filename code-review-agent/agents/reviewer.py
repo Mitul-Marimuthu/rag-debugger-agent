@@ -1,11 +1,12 @@
 import json
 from typing import Optional
 
-import anthropic
+from google import genai as google_genai
+from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 
 from config import settings
-from prompts.review_prompt import SYSTEM_PROMPT, REVIEW_SCHEMA, build_review_prompt
+from prompts.review_prompt import SYSTEM_PROMPT, build_review_prompt
 
 
 class ReviewIssue(BaseModel):
@@ -39,13 +40,13 @@ class ReviewResult(BaseModel):
         return [i for i in self.issues if i.severity == "suggestion"]
 
 
-_client: Optional[anthropic.Anthropic] = None
+_client: Optional[google_genai.Client] = None
 
 
-def _get_client() -> anthropic.Anthropic:
+def _get_client() -> google_genai.Client:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        _client = google_genai.Client(api_key=settings.gemini_api_key)
     return _client
 
 
@@ -58,38 +59,36 @@ def review_file(
     client = _get_client()
     messages = build_review_prompt(file_content, file_path, context_chunks, rules)
 
-    with client.messages.stream(
-        model=settings.model_name,
-        max_tokens=16000,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        thinking={"type": "adaptive"},
-        messages=messages,
-        output_config={
-            "format": {
-                "type": "json_schema",
-                "schema": REVIEW_SCHEMA,
-            }
-        },
-    ) as stream:
-        final = stream.get_final_message()
+    # Flatten the messages list into a single user prompt string
+    parts = []
+    for msg in messages:
+        for block in msg.get("content", []):
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block["text"])
+            elif isinstance(block, str):
+                parts.append(block)
+    prompt = "\n\n".join(parts)
 
-    raw_json = next(
-        (b.text for b in final.content if b.type == "text"),
-        "{}",
+    response = client.models.generate_content(
+        model=settings.model_name,
+        contents=prompt,
+        config=genai_types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            response_mime_type="application/json",
+        ),
     )
 
     try:
-        data = json.loads(raw_json)
-    except json.JSONDecodeError:
+        data = json.loads(response.text)
+    except (json.JSONDecodeError, AttributeError):
         data = {"summary": "Failed to parse review output.", "overall_severity": "clean", "issues": []}
 
-    issues = [ReviewIssue(**issue) for issue in data.get("issues", [])]
+    issues = []
+    for issue in data.get("issues", []):
+        try:
+            issues.append(ReviewIssue(**issue))
+        except Exception:
+            pass
 
     return ReviewResult(
         file_path=file_path,
