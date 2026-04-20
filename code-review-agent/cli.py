@@ -231,6 +231,54 @@ def fix(
 
 
 @app.command()
+def fix_file(
+    file_path: str = typer.Argument(..., help="Path to the file to review and fix"),
+    no_context: bool = typer.Option(False, "--no-context", help="Disable RAG context retrieval"),
+    no_rules: bool = typer.Option(False, "--no-rules", help="Disable rules retrieval"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show fixes without writing files"),
+):
+    """Review a file and write fixes to {filename}_fixed.{ext}. Original is never touched."""
+    from agents.retriever import retrieve_context, retrieve_rules
+    from agents.reviewer import review_file
+    from agents.fixer import apply_fixes_to_copy, count_fixable
+    from rich.text import Text
+
+    path = Path(file_path)
+    if not path.exists():
+        typer.echo(f"Error: file '{file_path}' does not exist.", err=True)
+        raise typer.Exit(1)
+
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+
+    console.print(f"[bold blue]Reviewing:[/bold blue] {file_path}")
+    context = [] if no_context else retrieve_context(content, str(path))
+    rules = [] if no_rules else retrieve_rules(content, str(path))
+    result = review_file(content, str(path), context, rules)
+
+    _print_result(result)
+
+    n = count_fixable(result)
+    if n == 0:
+        console.print("[yellow]No fixable issues found.[/yellow]")
+        return
+
+    if dry_run:
+        from rich.text import Text
+        for issue in [i for i in result.issues if i.fix]:
+            body = Text()
+            body.append(f"Line {issue.line_start}–{issue.line_end}\n", style="dim")
+            body.append(f"{issue.description}\n\n", style="white")
+            body.append("Suggested fix:\n", style="bold")
+            body.append(issue.fix, style="green")
+            console.print(Panel(body, title=f"[cyan]{issue.title}[/cyan]", border_style="cyan"))
+        return
+
+    output = apply_fixes_to_copy(str(path), content, result)
+    console.print(f"[green]Wrote {n} fix(es) to[/green] [bold]{output}[/bold]")
+
+
+@app.command()
 def pipeline(
     repo_path: str = typer.Argument(..., help="Local path or 'owner/repo' GitHub identifier"),
     force_index: bool = typer.Option(False, "--force-index", help="Re-index even if cache is fresh"),
