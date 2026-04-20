@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(..., description="Anthropic API key")
     openai_api_key: str = Field(default="", description="Unused")
     gemini_api_key: str = Field(default="", description="Unused")
+    groq_api_key: str = Field(default="", description="Groq API key for LLM inference")
     github_token: str = Field(..., description="GitHub personal access token")
     github_webhook_secret: str = Field(default="", description="GitHub webhook HMAC secret")
 

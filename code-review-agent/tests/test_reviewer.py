@@ -38,9 +38,9 @@ def test_review_file_returns_result(mock_get_client):
     mock_client = MagicMock()
     mock_get_client.return_value = mock_client
 
-    mock_response = MagicMock()
-    mock_response.text = json.dumps(MOCK_REVIEW_RESPONSE)
-    mock_client.models.generate_content.return_value = mock_response
+    mock_choice = MagicMock()
+    mock_choice.message.content = json.dumps(MOCK_REVIEW_RESPONSE)
+    mock_client.chat.completions.create.return_value = MagicMock(choices=[mock_choice])
 
     result = review_file(SAMPLE_CODE, "app.py", [], [])
 
@@ -55,9 +55,9 @@ def test_review_file_malformed_json(mock_get_client):
     mock_client = MagicMock()
     mock_get_client.return_value = mock_client
 
-    mock_response = MagicMock()
-    mock_response.text = "not json"
-    mock_client.models.generate_content.return_value = mock_response
+    mock_choice = MagicMock()
+    mock_choice.message.content = "not json"
+    mock_client.chat.completions.create.return_value = MagicMock(choices=[mock_choice])
 
     result = review_file(SAMPLE_CODE, "app.py", [], [])
     assert isinstance(result, ReviewResult)

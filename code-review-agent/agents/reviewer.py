@@ -1,12 +1,11 @@
 import json
 from typing import Optional
 
-from google import genai as google_genai
-from google.genai import types as genai_types
+from groq import Groq
 from pydantic import BaseModel, Field
 
 from config import settings
-from prompts.review_prompt import SYSTEM_PROMPT, build_review_prompt
+from prompts.review_prompt import SYSTEM_PROMPT, REVIEW_SCHEMA, build_review_prompt
 
 
 class ReviewIssue(BaseModel):
@@ -40,13 +39,13 @@ class ReviewResult(BaseModel):
         return [i for i in self.issues if i.severity == "suggestion"]
 
 
-_client: Optional[google_genai.Client] = None
+_client: Optional[Groq] = None
 
 
-def _get_client() -> google_genai.Client:
+def _get_client() -> Groq:
     global _client
     if _client is None:
-        _client = google_genai.Client(api_key=settings.gemini_api_key)
+        _client = Groq(api_key=settings.groq_api_key)
     return _client
 
 
@@ -59,7 +58,7 @@ def review_file(
     client = _get_client()
     messages = build_review_prompt(file_content, file_path, context_chunks, rules)
 
-    # Flatten the messages list into a single user prompt string
+    # Flatten content blocks into a single user message string
     parts = []
     for msg in messages:
         for block in msg.get("content", []):
@@ -67,20 +66,30 @@ def review_file(
                 parts.append(block["text"])
             elif isinstance(block, str):
                 parts.append(block)
-    prompt = "\n\n".join(parts)
 
-    response = client.models.generate_content(
+    response = client.chat.completions.create(
         model=settings.model_name,
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            response_mime_type="application/json",
-        ),
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    f"{SYSTEM_PROMPT}\n\n"
+                    f"You MUST respond with a JSON object that exactly matches this schema:\n"
+                    f"{json.dumps(REVIEW_SCHEMA, indent=2)}\n\n"
+                    f"Do not wrap it in markdown. Return only the raw JSON object."
+                ),
+            },
+            {"role": "user", "content": "\n\n".join(parts)},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0,
     )
 
+    raw_json = response.choices[0].message.content or "{}"
+
     try:
-        data = json.loads(response.text)
-    except (json.JSONDecodeError, AttributeError):
+        data = json.loads(raw_json)
+    except json.JSONDecodeError:
         data = {"summary": "Failed to parse review output.", "overall_severity": "clean", "issues": []}
 
     issues = []
