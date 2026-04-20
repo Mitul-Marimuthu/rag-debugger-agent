@@ -173,6 +173,163 @@ def review_pr(
 
 
 @app.command()
+def fix(
+    file_path: str = typer.Argument(..., help="Path to the file to review and fix"),
+    no_context: bool = typer.Option(False, "--no-context", help="Disable RAG context retrieval"),
+    no_rules: bool = typer.Option(False, "--no-rules", help="Disable rules retrieval"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show fixes without writing files"),
+):
+    """Review a file and apply fixes locally. Creates a .bak backup before overwriting."""
+    from agents.retriever import retrieve_context, retrieve_rules
+    from agents.reviewer import review_file
+    from agents.action import _apply_fixes
+    import shutil
+
+    path = Path(file_path)
+    if not path.exists():
+        typer.echo(f"Error: file '{file_path}' does not exist.", err=True)
+        raise typer.Exit(1)
+
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        content = f.read()
+
+    console.print(f"[bold blue]Reviewing:[/bold blue] {file_path}")
+
+    context = [] if no_context else retrieve_context(content, str(path))
+    rules = [] if no_rules else retrieve_rules(content, str(path))
+    result = review_file(content, str(path), context, rules)
+
+    _print_result(result)
+
+    fixable = [i for i in result.issues if i.fix]
+    if not fixable:
+        console.print("[yellow]No fixable issues found.[/yellow]")
+        return
+
+    console.print(f"\n[bold]{len(fixable)} fixable issue(s) found.[/bold]")
+
+    if dry_run:
+        from rich.text import Text
+        for issue in fixable:
+            body = Text()
+            body.append(f"Line {issue.line_start}–{issue.line_end}\n", style="dim")
+            body.append(f"{issue.description}\n\n", style="white")
+            body.append("Suggested fix:\n", style="bold")
+            body.append(issue.fix, style="green")
+            console.print(Panel(body, title=f"[cyan]{issue.title}[/cyan]", border_style="cyan"))
+        return
+
+    backup = path.with_suffix(path.suffix + ".bak")
+    shutil.copy2(path, backup)
+    console.print(f"[dim]Backup saved to {backup}[/dim]")
+
+    patched = _apply_fixes(content, result)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(patched)
+
+    console.print(f"[green]Fixed {len(fixable)} issue(s) in {path}[/green]")
+
+
+@app.command()
+def pipeline(
+    repo_path: str = typer.Argument(..., help="Local path or 'owner/repo' GitHub identifier"),
+    force_index: bool = typer.Option(False, "--force-index", help="Re-index even if cache is fresh"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show fixes without writing files"),
+    no_rules: bool = typer.Option(False, "--no-rules", help="Skip rules retrieval"),
+):
+    """Full pipeline: index a repo, review all source files, and apply fixes locally."""
+    import tempfile
+    import shutil as _shutil
+    from agents.indexer import index_repo
+    from agents.retriever import retrieve_context, retrieve_rules
+    from agents.reviewer import review_file
+    from agents.action import _apply_fixes
+
+    github_repo = None
+    tmp_dir = None
+
+    if "/" in repo_path and not Path(repo_path).exists():
+        from config import settings
+        import git as gitpython
+
+        github_repo = repo_path
+        clone_url = f"https://{settings.github_token}@github.com/{github_repo}.git"
+        tmp_dir = tempfile.mkdtemp(prefix="cra_pipeline_")
+        console.print(f"[bold blue]Cloning[/bold blue] {github_repo} ...")
+        try:
+            gitpython.Repo.clone_from(clone_url, tmp_dir)
+        except Exception as e:
+            typer.echo(f"Error cloning repo: {e}", err=True)
+            _shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise typer.Exit(1)
+        root = Path(tmp_dir)
+    else:
+        root = Path(repo_path).resolve()
+        if not root.exists():
+            typer.echo(f"Error: path '{repo_path}' does not exist.", err=True)
+            raise typer.Exit(1)
+
+    try:
+        # 1 — Index
+        console.print(f"\n[bold blue]Step 1/3 — Indexing[/bold blue] {github_repo or root}")
+        stats = index_repo(str(root), force=force_index, verbose=False)
+        console.print(f"  Indexed {stats['indexed']} files, {stats['chunks']} chunks")
+        _index_rules()
+
+        # 2 — Review all source files
+        console.print("\n[bold blue]Step 2/3 — Reviewing files[/bold blue]")
+        from agents.indexer import SUPPORTED_EXTENSIONS, IGNORE_DIRS
+        import os
+
+        all_results = []
+        for dirpath, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+            for fname in files:
+                fpath = Path(dirpath) / fname
+                if fpath.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                    continue
+                try:
+                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                except OSError:
+                    continue
+
+                console.print(f"  Reviewing [cyan]{fpath.relative_to(root)}[/cyan]...")
+                context = retrieve_context(content, str(fpath))
+                rules = [] if no_rules else retrieve_rules(content, str(fpath))
+                result = review_file(content, str(fpath), context, rules)
+                all_results.append((fpath, content, result))
+                _print_result(result)
+
+        # 3 — Apply fixes
+        console.print("\n[bold blue]Step 3/3 — Applying fixes[/bold blue]")
+        fixed_count = 0
+        for fpath, content, result in all_results:
+            fixable = [i for i in result.issues if i.fix]
+            if not fixable:
+                continue
+
+            if dry_run:
+                console.print(f"  [dim](dry-run) would fix {len(fixable)} issue(s) in {fpath.name}[/dim]")
+                continue
+
+            backup = fpath.with_suffix(fpath.suffix + ".bak")
+            import shutil
+            shutil.copy2(fpath, backup)
+            patched = _apply_fixes(content, result)
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write(patched)
+            console.print(f"  [green]Fixed {len(fixable)} issue(s) in {fpath.name}[/green]")
+            fixed_count += 1
+
+        console.print(f"\n[bold green]Pipeline complete.[/bold green] {fixed_count} file(s) patched.")
+
+    finally:
+        if tmp_dir:
+            _shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@app.command()
 def serve(
     host: Optional[str] = typer.Option(None, help="Override webhook host"),
     port: Optional[int] = typer.Option(None, help="Override webhook port"),
