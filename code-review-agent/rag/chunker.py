@@ -1,7 +1,7 @@
 import ast
 from pathlib import Path
 from typing import Optional
-
+#comment
 
 def chunk_python_file(source_code: str, file_path: str) -> list[dict]:
     try:
