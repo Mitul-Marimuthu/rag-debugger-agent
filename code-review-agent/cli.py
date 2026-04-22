@@ -285,34 +285,41 @@ def fix_folder(
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable rules retrieval"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be fixed without writing files"),
     recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Walk subdirectories"),
+    out_dir: str = typer.Option("fixed", "--out-dir", help="Output folder name (created inside the target folder)"),
 ):
-    """Run fix-file on every source file in a folder, skipping files already named *_fixed.*."""
+    """Review every source file in a folder and write all fixed files into a mirrored
+    output directory (default: <folder>/fixed/). Files without issues are copied as-is
+    so the output folder is a complete, self-contained copy whose files reference each other."""
     import os
+    import shutil
     from agents.indexer import SUPPORTED_EXTENSIONS, _ignore_dir
     from agents.retriever import retrieve_context, retrieve_rules
     from agents.reviewer import review_file
-    from agents.fixer import apply_fixes_to_copy, count_fixable
+    from agents.fixer import apply_fixes_to_path, count_fixable
 
     root = Path(folder_path).resolve()
     if not root.exists():
         typer.echo(f"Error: folder '{folder_path}' does not exist.", err=True)
         raise typer.Exit(1)
 
-    processed = skipped = fixed = 0
+    output_root = root / out_dir
+    if not dry_run:
+        output_root.mkdir(parents=True, exist_ok=True)
+        console.print(f"[dim]Output folder: {output_root}[/dim]")
 
-    from agents.indexer import _ignore_dir
+    processed = fixed = copied = 0
+
     walker = os.walk(root) if recursive else [(str(root), [], os.listdir(root))]
     for dirpath, dirs, files in walker:
         if recursive:
-            dirs[:] = [d for d in dirs if not _ignore_dir(d)]
+            dirs[:] = [d for d in dirs if not _ignore_dir(d) and d != out_dir]
         for fname in files:
             fpath = Path(dirpath) / fname
             if fpath.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
-            # Skip already-fixed copies
-            if fpath.stem.endswith("_fixed"):
-                skipped += 1
-                continue
+
+            rel = fpath.relative_to(root)
+            dest = output_root / rel
 
             try:
                 with open(fpath, "r", encoding="utf-8", errors="replace") as f:
@@ -321,7 +328,6 @@ def fix_folder(
                 continue
 
             processed += 1
-            rel = fpath.relative_to(root)
             console.print(f"[bold blue]Reviewing:[/bold blue] {rel}")
 
             context = [] if no_context else retrieve_context(content, str(fpath))
@@ -330,22 +336,30 @@ def fix_folder(
             _print_result(result)
 
             n = count_fixable(result)
-            if n == 0:
-                console.print(f"  [dim]No fixable issues.[/dim]")
-                continue
 
             if dry_run:
-                console.print(f"  [dim](dry-run) would write {n} fix(es) to {fpath.stem}_fixed{fpath.suffix}[/dim]")
-                fixed += 1
+                if n:
+                    console.print(f"  [dim](dry-run) {n} fix(es) → {rel}[/dim]")
+                    fixed += 1
+                else:
+                    console.print(f"  [dim](dry-run) no fixes → copy as-is[/dim]")
+                    copied += 1
                 continue
 
-            output = apply_fixes_to_copy(str(fpath), content, result)
-            console.print(f"  [green]Wrote {n} fix(es) to[/green] [bold]{Path(output).name}[/bold]")
-            fixed += 1
+            if n:
+                apply_fixes_to_path(str(dest), content, result)
+                console.print(f"  [green]{n} fix(es) written →[/green] fixed/{rel}")
+                fixed += 1
+            else:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(fpath, dest)
+                console.print(f"  [dim]No fixes — copied →[/dim] fixed/{rel}")
+                copied += 1
 
     console.print(
         f"\n[bold green]Done.[/bold green] "
-        f"Processed {processed} file(s), fixed {fixed}, skipped {skipped} already-fixed."
+        f"{processed} file(s) processed: {fixed} fixed, {copied} copied unchanged."
+        + (f"\n  Output: {output_root}" if not dry_run else "")
     )
 
 
