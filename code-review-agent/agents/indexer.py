@@ -12,6 +12,10 @@ HASH_CACHE_FILE = ".index_hashes.json"
 IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "dist", "build", ".next"}
 
 
+def _ignore_dir(name: str) -> bool:
+    return name in IGNORE_DIRS or "env" in name.lower()
+
+
 def _file_hash(file_path: str) -> str:
     h = hashlib.md5()
     with open(file_path, "rb") as f:
@@ -38,7 +42,7 @@ def _should_index(file_path: str) -> bool:
     if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
         return False
     for part in path.parts:
-        if part in IGNORE_DIRS:
+        if _ignore_dir(part):
             return False
     return True
 
@@ -67,7 +71,7 @@ def index_repo(repo_path: str, force: bool = False, verbose: bool = True) -> dic
     stats = {"indexed": 0, "skipped": 0, "files": 0, "chunks": 0}
 
     for root, dirs, files in os.walk(repo_path):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        dirs[:] = [d for d in dirs if not _ignore_dir(d)]
         for fname in files:
             fpath = os.path.join(root, fname)
             if not _should_index(fpath):
@@ -119,7 +123,7 @@ def delta_index(changed_files: list[str], repo_path: str = ".") -> dict:
 def also_index_docs(repo_path: str) -> None:
     doc_files = []
     for root, dirs, files in os.walk(repo_path):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        dirs[:] = [d for d in dirs if not _ignore_dir(d)]
         for fname in files:
             if fname.lower() in ("readme.md", "readme.txt", "readme.rst", "contributing.md"):
                 doc_files.append(os.path.join(root, fname))

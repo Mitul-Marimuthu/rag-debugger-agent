@@ -279,6 +279,77 @@ def fix_file(
 
 
 @app.command()
+def fix_folder(
+    folder_path: str = typer.Argument(..., help="Path to the folder to process"),
+    no_context: bool = typer.Option(False, "--no-context", help="Disable RAG context retrieval"),
+    no_rules: bool = typer.Option(False, "--no-rules", help="Disable rules retrieval"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be fixed without writing files"),
+    recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Walk subdirectories"),
+):
+    """Run fix-file on every source file in a folder, skipping files already named *_fixed.*."""
+    import os
+    from agents.indexer import SUPPORTED_EXTENSIONS, _ignore_dir
+    from agents.retriever import retrieve_context, retrieve_rules
+    from agents.reviewer import review_file
+    from agents.fixer import apply_fixes_to_copy, count_fixable
+
+    root = Path(folder_path).resolve()
+    if not root.exists():
+        typer.echo(f"Error: folder '{folder_path}' does not exist.", err=True)
+        raise typer.Exit(1)
+
+    processed = skipped = fixed = 0
+
+    from agents.indexer import _ignore_dir
+    walker = os.walk(root) if recursive else [(str(root), [], os.listdir(root))]
+    for dirpath, dirs, files in walker:
+        if recursive:
+            dirs[:] = [d for d in dirs if not _ignore_dir(d)]
+        for fname in files:
+            fpath = Path(dirpath) / fname
+            if fpath.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                continue
+            # Skip already-fixed copies
+            if fpath.stem.endswith("_fixed"):
+                skipped += 1
+                continue
+
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except OSError:
+                continue
+
+            processed += 1
+            rel = fpath.relative_to(root)
+            console.print(f"[bold blue]Reviewing:[/bold blue] {rel}")
+
+            context = [] if no_context else retrieve_context(content, str(fpath))
+            rules = [] if no_rules else retrieve_rules(content, str(fpath))
+            result = review_file(content, str(fpath), context, rules)
+            _print_result(result)
+
+            n = count_fixable(result)
+            if n == 0:
+                console.print(f"  [dim]No fixable issues.[/dim]")
+                continue
+
+            if dry_run:
+                console.print(f"  [dim](dry-run) would write {n} fix(es) to {fpath.stem}_fixed{fpath.suffix}[/dim]")
+                fixed += 1
+                continue
+
+            output = apply_fixes_to_copy(str(fpath), content, result)
+            console.print(f"  [green]Wrote {n} fix(es) to[/green] [bold]{Path(output).name}[/bold]")
+            fixed += 1
+
+    console.print(
+        f"\n[bold green]Done.[/bold green] "
+        f"Processed {processed} file(s), fixed {fixed}, skipped {skipped} already-fixed."
+    )
+
+
+@app.command()
 def pipeline(
     repo_path: str = typer.Argument(..., help="Local path or 'owner/repo' GitHub identifier"),
     force_index: bool = typer.Option(False, "--force-index", help="Re-index even if cache is fresh"),
@@ -326,12 +397,12 @@ def pipeline(
 
         # 2 — Review all source files
         console.print("\n[bold blue]Step 2/3 — Reviewing files[/bold blue]")
-        from agents.indexer import SUPPORTED_EXTENSIONS, IGNORE_DIRS
+        from agents.indexer import SUPPORTED_EXTENSIONS, _ignore_dir
         import os
 
         all_results = []
         for dirpath, dirs, files in os.walk(root):
-            dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+            dirs[:] = [d for d in dirs if not _ignore_dir(d)]
             for fname in files:
                 fpath = Path(dirpath) / fname
                 if fpath.suffix.lower() not in SUPPORTED_EXTENSIONS:
